@@ -28,6 +28,9 @@
     }
 
     #character {
+      height: 50vh !important;
+      width: auto !important;
+      max-width: none !important;
       position: absolute; display: none; pointer-events: none;
       transform-origin: center bottom; transform: scaleX(-1);
       filter: drop-shadow(0 6px 14px rgba(0,0,0,0.45));
@@ -355,9 +358,9 @@
 
       charEl.style.left   = x + "px";
       charEl.style.top    = y + "px";
-      charEl.style.height = charH + "px";
-      charEl.style.width  = charH + "px";
-      charEl.style.objectFit = "contain";
+      // height set via CSS (50vh)
+      // width set via CSS (auto)
+      
     }
 
     // ─── TRACKING INDICATORS ────────────────────────────
