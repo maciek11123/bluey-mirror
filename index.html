@@ -341,8 +341,8 @@
     }
 
     function positionChar(person, mp) {
-      // Fixed 40% of screen height. Period.
-      const charH = mp.ch * 0.40;
+      // Fixed 50% of screen height.
+      const charH = mp.ch * 0.50;
 
       const dir = person.px < mp.cw / 2 ? 1 : -1;
       const offset = person.shoulderW * 1.2 * dir;
@@ -356,7 +356,8 @@
       charEl.style.left   = x + "px";
       charEl.style.top    = y + "px";
       charEl.style.height = charH + "px";
-      charEl.style.width  = "auto";
+      charEl.style.width  = charH + "px";
+      charEl.style.objectFit = "contain";
     }
 
     // ─── TRACKING INDICATORS ────────────────────────────
