@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bluey Mirror</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000; overflow: hidden; width: 100vw; height: 100vh; cursor: none; }
+
+    #container {
+      position: relative; width: 100vw; height: 100vh;
+      overflow: hidden; transform: scaleX(-1);
+    }
+    #webcam {
+      position: absolute; top: 0; left: 0;
+      width: 100%; height: 100%; object-fit: cover;
+    }
+    #trackingCanvas {
+      position: absolute; top: 0; left: 0;
+      width: 100%; height: 100%;
+      z-index: 5; pointer-events: none;
+    }
+    #overlay {
+      position: absolute; top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none; z-index: 10;
+    }
+
+    #character {
+      position: absolute; display: none; pointer-events: none;
+      transform-origin: center bottom; transform: scaleX(-1);
+      filter: drop-shadow(0 6px 14px rgba(0,0,0,0.45));
+      will-change: transform, opacity, left, top;
+    }
+
+    @keyframes popIn {
+      0%   { opacity: 0; transform: scaleX(-1) scale(0) translateY(30px); }
+      55%  { opacity: 1; transform: scaleX(-1) scale(1.12) translateY(-8px); }
+      75%  { transform: scaleX(-1) scale(0.96) translateY(3px); }
+      100% { opacity: 1; transform: scaleX(-1) scale(1) translateY(0); }
+    }
+    @keyframes popOut {
+      0%   { opacity: 1; transform: scaleX(-1) scale(1); }
+      35%  { opacity: 1; transform: scaleX(-1) scale(1.08) translateY(-10px); }
+      100% { opacity: 0; transform: scaleX(-1) scale(0) translateY(20px); }
+    }
+
+    #character.entering { display: block; animation: popIn 0.5s cubic-bezier(0.34,1.56,0.64,1) forwards; }
+    #character.visible  { display: block; opacity: 1; transform: scaleX(-1); }
+    #character.exiting  { display: block; animation: popOut 0.45s ease-in forwards; }
+
+    /* Splash */
+    #status {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      display: flex; align-items: center; justify-content: center;
+      z-index: 1000; background: rgba(0,0,0,0.85); transition: opacity 1.5s ease;
+    }
+    #status.hidden { opacity: 0; pointer-events: none; }
+    #status-inner { text-align: center; color: #fff; font-family: -apple-system, 'Segoe UI', sans-serif; }
+    #status-inner h1 {
+      font-size: 48px; font-weight: 700; margin-bottom: 16px;
+      background: linear-gradient(135deg, #5BC0EB, #FDE74C, #FF6B6B);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    #status-inner p { font-size: 20px; color: rgba(255,255,255,0.7); }
+    .spinner {
+      display: inline-block; width: 28px; height: 28px;
+      border: 3px solid rgba(255,255,255,0.2); border-top-color: #5BC0EB;
+      border-radius: 50%; animation: spin 0.8s linear infinite;
+      vertical-align: middle; margin-right: 10px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #hint {
+      position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
+      color: rgba(255,255,255,0.85);
+      font: 600 24px -apple-system, 'Segoe UI', sans-serif;
+      z-index: 100; text-shadow: 0 2px 10px rgba(0,0,0,0.7);
+      opacity: 0; transition: opacity 1s ease; pointer-events: none;
+    }
+    #hint.show { opacity: 1; }
+
+    #debug {
+      display: none; position: fixed; top: 10px; left: 10px;
+      color: #0f0; font: 14px/1.6 monospace;
+      background: rgba(0,0,0,0.8); padding: 12px 16px;
+      border-radius: 8px; z-index: 2000; white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="status">
+    <div id="status-inner">
+      <h1>Bluey Mirror</h1>
+      <p><span class="spinner"></span><span id="status-msg">Loading…</span></p>
+    </div>
+  </div>
+  <div id="hint">👋 Wave to say hi!</div>
+
+  <div id="container">
+    <video id="webcam" autoplay playsinline muted></video>
+    <canvas id="trackingCanvas"></canvas>
+    <div id="overlay">
+      <img id="character" alt="" />
+    </div>
+  </div>
+  <div id="debug"></div>
+
+  <script type="module">
+    // ─── GIF LIBRARY with activity tags ─────────────────
+    const GIFS = [
+      // ── Animated GIFs ──
+      { src: "bluey_dancing_1.gif",      desc: "Bingo waving, one arm up (animated)",        activity: ["waving"],            animated: true },
+      { src: "bingo_dance_1.gif",        desc: "Bingo dancing, smug pose (animated)",         activity: ["waving", "dancing"], animated: true },
+      { src: "bluey_1.gif",              desc: "Orange dog grooving, eyes closed (animated)", activity: ["dancing"],           animated: true },
+      { src: "bluey_bingo_dance_1.gif",  desc: "Dog with guitar, performing (animated)",      activity: ["dancing"],           animated: true },
+      { src: "bluey_bingo_surprised.gif",desc: "Bingo surprised face (animated)",             activity: ["jumping", "armsup"], animated: true },
+      { src: "bluey_bong_happy.gif",     desc: "Colorful bird character (animated)",          activity: ["idle", "waving"],    animated: true },
+      { src: "bluey_dancing_2.gif",      desc: "Bluey the blue dog, dancing (animated)",      activity: ["dancing", "waving"], animated: true },
+      // ── Static PNGs (fallback) ──
+      { src: "bluey_arms_up.png",        desc: "Bluey excited, arms raised wide",             activity: ["armsup", "waving"],  animated: false },
+      { src: "bluey_scared.png",         desc: "Bluey startled, fists up",                    activity: ["jumping"],           animated: false },
+      { src: "bluey_walking.png",        desc: "Bluey walking casually",                      activity: ["idle"],              animated: false },
+      { src: "bluey_bingo_jumping.png",  desc: "Bluey & Bingo jumping together",              activity: ["jumping", "armsup"], animated: false },
+      { src: "bingo_waving.png",         desc: "Bingo waving, looking happy",                 activity: ["waving"],            animated: false },
+      { src: "bingo_arms_wide.png",      desc: "Bingo arms spread, playful",                  activity: ["dancing", "waving"], animated: false },
+      { src: "bluey_dancing_happy.png",  desc: "Bluey dancing, eyes closed, grooving",        activity: ["dancing"],           animated: false },
+      { src: "bingo_dancing_groove.png", desc: "Bingo dancing, eyes closed, grooving",        activity: ["dancing"],           animated: false },
+      { src: "family_dancing.png",       desc: "Whole Heeler family dancing together",         activity: ["dancing", "armsup"], animated: false },
+      { src: "bingo_standing_sad.png",   desc: "Bingo standing, looking unsure",              activity: ["idle"],              animated: false },
+      { src: "chilli_dancing.png",       desc: "Chilli (mum) dancing, grooving",              activity: ["dancing"],           animated: false },
+      { src: "bluey_fists_up.png",       desc: "Bluey excited, fists raised",                 activity: ["jumping", "armsup"], animated: false },
+      { src: "bingo_looking_sad.png",    desc: "Bingo standing, looking sad",                 activity: ["idle"],              animated: false },
+      { src: "bingo_baby_arms_wide.png", desc: "Baby Bingo, arms spread wide",                activity: ["dancing", "waving"], animated: false },
+      { src: "bingo_waving_happy.png",   desc: "Bingo waving, smiling",                       activity: ["waving"],            animated: false },
+    ];
+
+    // ─── CONFIG ─────────────────────────────────────────
+    const CFG = {
+      smoothing: 0.5,
+      trackThreshold: 0.25,
+      ghostFrames: 20,
+
+      // Wave detection
+      waveHandThresh: 0.04,
+      waveChanges: 2,
+      waveWindowMs: 2500,
+      waveCooldownMs: 2500,
+      holdThresh: 0.05,
+      holdMs: 800,
+
+      // Character
+      charVisibleMs: 7000,
+      globalCooldownMs: 3000,
+
+      // Activity detection
+      velocityWindow: 20,          // frames to average
+      dancingThreshold: 0.008,     // normalized velocity for "dancing"
+      jumpThreshold: 0.055,        // sudden Y drop
+    };
+
+    // ─── ELEMENTS ───────────────────────────────────────
+    const video   = document.getElementById("webcam");
+    const overlay = document.getElementById("overlay");
+    const charEl  = document.getElementById("character");
+    const tCanvas = document.getElementById("trackingCanvas");
+    const tCtx    = tCanvas.getContext("2d");
+    const statusEl  = document.getElementById("status");
+    const statusMsg = document.getElementById("status-msg");
+    const hintEl    = document.getElementById("hint");
+    const debugEl   = document.getElementById("debug");
+
+    // ─── STATE ──────────────────────────────────────────
+    let people = [];
+    let lastVideoTime = -1;
+    let fps = 0, frameCt = 0, fpsT = performance.now();
+    let showDebug = false;
+    let charActive = false;
+    let lastCharTime = 0;
+    let lastGifIdx = -1;
+    let followTarget = null;
+
+    // ─── COORD MAPPING ─────────────────────────────────
+    function getMap() {
+      const cw = overlay.clientWidth, ch = overlay.clientHeight;
+      const vw = video.videoWidth || 640, vh = video.videoHeight || 480;
+      const cA = cw / ch, vA = vw / vh;
+      let s, ox, oy;
+      if (vA > cA) { s = ch / vh; ox = (vw * s - cw) / 2; oy = 0; }
+      else         { s = cw / vw; ox = 0; oy = (vh * s - ch) / 2; }
+      return { s, ox, oy, vw, vh, cw, ch };
+    }
+    function lm2px(lm, m) {
+      return { x: lm.x * m.vw * m.s - m.ox, y: lm.y * m.vh * m.s - m.oy };
+    }
+
+    // ─── ACTIVITY DETECTION ─────────────────────────────
+    function detectActivity(pose, person, now) {
+      // Track position history for velocity
+      person.posHistory.push({ x: person.nx, y: person.ny, t: now });
+      if (person.posHistory.length > CFG.velocityWindow) person.posHistory.shift();
+
+      // Average velocity over window
+      let totalV = 0;
+      for (let i = 1; i < person.posHistory.length; i++) {
+        const dx = person.posHistory[i].x - person.posHistory[i - 1].x;
+        const dy = person.posHistory[i].y - person.posHistory[i - 1].y;
+        totalV += Math.hypot(dx, dy);
+      }
+      const avgV = person.posHistory.length > 1
+        ? totalV / (person.posHistory.length - 1) : 0;
+
+      // Jump detection: sudden upward movement
+      person.hipYHistory.push(person.ny);
+      if (person.hipYHistory.length > 30) person.hipYHistory.shift();
+      let isJumping = false;
+      if (person.hipYHistory.length > 10) {
+        const baseline = person.hipYHistory.slice(0, -3).reduce((a, b) => a + b, 0)
+          / (person.hipYHistory.length - 3);
+        if (baseline - person.ny > CFG.jumpThreshold) isJumping = true;
+      }
+
+      // Arms up detection
+      const lW = pose[15], rW = pose[16], nose = pose[0];
+      let armsUp = false;
+      if (lW && rW && nose) {
+        armsUp = (nose.y - lW.y) > 0.08 && (nose.y - rW.y) > 0.08;
+      }
+
+      // Determine activity
+      if (isJumping) person.activity = "jumping";
+      else if (armsUp) person.activity = "armsup";
+      else if (avgV > CFG.dancingThreshold) person.activity = "dancing";
+      else person.activity = "idle";
+
+      person.velocity = avgV;
+    }
+
+    // ─── PICK GIF BASED ON ACTIVITY ─────────────────────
+    function pickGif(activity) {
+      // Find animated GIFs that match this activity first
+      let matches = GIFS.filter(g => g.activity.includes(activity) && g.animated);
+      // Fall back to any animated GIF if no activity match
+      if (matches.length === 0) matches = GIFS.filter(g => g.animated);
+      // Last resort: static PNGs
+      if (matches.length === 0) matches = GIFS.filter(g => g.activity.includes(activity));
+      if (matches.length === 0) matches = GIFS;
+
+      // Avoid same as last time
+      let filtered = matches.filter((_, i) => GIFS.indexOf(matches[i]) !== lastGifIdx);
+      if (filtered.length === 0) filtered = matches;
+
+      const pick = filtered[Math.floor(Math.random() * filtered.length)];
+      lastGifIdx = GIFS.indexOf(pick);
+      // Cache-bust so GIF restarts animation on repeat
+      pick._src = pick.src + "?t=" + Date.now();
+      return pick;
+    }
+
+    // ─── WAVE DETECTION ─────────────────────────────────
+    function detectWave(pose, p, now) {
+      if (now - p.lastWaveTrigger < CFG.waveCooldownMs) return false;
+
+      const lW = pose[15], rW = pose[16], lS = pose[11], rS = pose[12], nose = pose[0];
+      if (!lW || !rW || !lS || !rS) return false;
+
+      let wrist, shoulder;
+      if (lW.y < rW.y) { wrist = lW; shoulder = lS; }
+      else              { wrist = rW; shoulder = rS; }
+
+      // Hold above head
+      if (nose && (nose.y - wrist.y) > CFG.holdThresh) {
+        if (!p.holdStart) p.holdStart = now;
+        p.holdProgress = Math.min((now - p.holdStart) / CFG.holdMs, 1);
+        if (p.holdProgress >= 1) {
+          p.holdStart = null; p.holdProgress = 0;
+          p.waveHist = []; p.lastWaveTrigger = now;
+          return true;
+        }
+      } else { p.holdStart = null; p.holdProgress = 0; }
+
+      // Oscillation
+      const handUp = (shoulder.y - wrist.y) > CFG.waveHandThresh;
+      if (!handUp) {
+        if (p.waveHist.length > 0 && now - p.waveHist[p.waveHist.length - 1].t > 600)
+          p.waveHist = [];
+        p.handUp = false;
+        return false;
+      }
+      p.handUp = true;
+      p.waveHist.push({ x: wrist.x, t: now });
+      p.waveHist = p.waveHist.filter(e => now - e.t < CFG.waveWindowMs);
+      if (p.waveHist.length < 4) return false;
+
+      let changes = 0, prev = 0;
+      for (let i = 1; i < p.waveHist.length; i++) {
+        const dx = p.waveHist[i].x - p.waveHist[i - 1].x;
+        const d = dx > 0.002 ? 1 : dx < -0.002 ? -1 : 0;
+        if (d !== 0 && d !== prev) { if (prev !== 0) changes++; prev = d; }
+      }
+      p.waveProgress = Math.min(changes / CFG.waveChanges, 1);
+
+      if (changes >= CFG.waveChanges) {
+        p.waveHist = []; p.lastWaveTrigger = now; p.waveProgress = 0;
+        return true;
+      }
+      return false;
+    }
+
+    // ─── SPAWN CHARACTER ────────────────────────────────
+    function spawnCharacter(person, mapping, now) {
+      if (charActive || now - lastCharTime < CFG.globalCooldownMs) return;
+
+      charActive = true;
+      lastCharTime = now;
+      followTarget = person;
+
+      // Pick image based on person's current activity
+      const gif = pickGif(person.activity === "idle" ? "waving" : person.activity);
+      charEl.src = gif._src || gif.src;
+      positionChar(person, mapping);
+
+      // Pop in → sit still (GIF animates itself) → pop out
+      charEl.style.display = ""; // clear any inline override
+      charEl.className = "entering";
+      setTimeout(() => {
+        if (!charActive) return;
+        charEl.className = "visible";
+        // Schedule exit
+        setTimeout(() => {
+          if (!charActive) return;
+          charEl.className = "exiting";
+          setTimeout(() => {
+            charEl.className = ""; charEl.style.display = "none";
+            charActive = false; followTarget = null;
+          }, 450);
+        }, CFG.charVisibleMs);
+      }, 500);
+    }
+
+    function positionChar(person, mp) {
+      // Fixed 40% of screen height. Period.
+      const charH = mp.ch * 0.40;
+
+      const dir = person.px < mp.cw / 2 ? 1 : -1;
+      const offset = person.shoulderW * 1.2 * dir;
+
+      let x = person.px + offset - charH * 0.4;
+      let y = person.footY - charH;
+
+      x = Math.max(0, Math.min(x, mp.cw - charH * 0.8));
+      y = Math.max(0, Math.min(y, mp.ch - charH));
+
+      charEl.style.left   = x + "px";
+      charEl.style.top    = y + "px";
+      charEl.style.height = charH + "px";
+      charEl.style.width  = "auto";
+    }
+
+    // ─── TRACKING INDICATORS ────────────────────────────
+    function drawIndicators(mp) {
+      tCanvas.width = mp.cw; tCanvas.height = mp.ch;
+      tCtx.clearRect(0, 0, mp.cw, mp.ch);
+      const cols = ["#5BC0EB", "#FF6B6B", "#FDE74C", "#9B5DE5"];
+
+      for (const p of people) {
+        const c = cols[p.ci] || "#fff";
+        const cx = p.px, cy = p.footY - p.torsoH;
+
+        // Activity-colored dot
+        const actCol = p.activity === "dancing" ? "#FDE74C"
+          : p.activity === "jumping" ? "#FF6B6B"
+          : p.activity === "armsup" ? "#9B5DE5" : c;
+
+        tCtx.beginPath();
+        tCtx.arc(cx, cy, 7, 0, Math.PI * 2);
+        tCtx.fillStyle = actCol;
+        tCtx.globalAlpha = 0.5;
+        tCtx.fill();
+        tCtx.globalAlpha = 1;
+
+        // Wave/hold progress
+        if (p.handUp && !charActive) {
+          tCtx.beginPath();
+          tCtx.arc(cx, cy - p.torsoH * 0.6, 18, 0, Math.PI * 2);
+          tCtx.strokeStyle = c; tCtx.lineWidth = 2; tCtx.globalAlpha = 0.4;
+          tCtx.stroke(); tCtx.globalAlpha = 1;
+
+          if ((p.waveProgress || 0) > 0) {
+            tCtx.beginPath();
+            tCtx.arc(cx, cy - p.torsoH * 0.6, 18,
+              -Math.PI/2, -Math.PI/2 + p.waveProgress * Math.PI * 2);
+            tCtx.strokeStyle = c; tCtx.lineWidth = 4; tCtx.stroke();
+          }
+          if ((p.holdProgress || 0) > 0) {
+            tCtx.beginPath();
+            tCtx.arc(cx, cy - p.torsoH * 0.6, 24,
+              -Math.PI/2, -Math.PI/2 + p.holdProgress * Math.PI * 2);
+            tCtx.strokeStyle = "#fff"; tCtx.lineWidth = 3; tCtx.stroke();
+          }
+        }
+      }
+    }
+
+    // ─── NEW PERSON ─────────────────────────────────────
+    function newPerson(det, ci) {
+      return {
+        nx: det.nx, ny: det.ny, px: det.px, footY: det.footY,
+        torsoH: det.torsoH, shoulderW: det.shoulderW,
+        ci, ghost: 0,
+        waveHist: [], lastWaveTrigger: 0,
+        holdStart: null, holdProgress: 0,
+        handUp: false, waveProgress: 0,
+        posHistory: [], hipYHistory: [],
+        activity: "idle", velocity: 0,
+      };
+    }
+
+    // ─── INIT ───────────────────────────────────────────
+    async function init() {
+      try {
+        statusMsg.textContent = "Loading pose detection…";
+        const { PoseLandmarker, FilesetResolver } = await import(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/vision_bundle.mjs"
+        );
+        const vision = await FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm"
+        );
+        const poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath:
+              "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+            delegate: "GPU",
+          },
+          runningMode: "VIDEO",
+          numPoses: 4,
+        });
+
+        statusMsg.textContent = "Starting camera…";
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } },
+        });
+        video.srcObject = stream;
+        await new Promise(r => video.addEventListener("loadeddata", r, { once: true }));
+
+        statusEl.classList.add("hidden");
+        setTimeout(() => statusEl.remove(), 2000);
+        setTimeout(() => hintEl.classList.add("show"), 2500);
+        setTimeout(() => hintEl.classList.remove("show"), 10000);
+
+        // ─── LOOP ───────────────────────────────────────
+        function loop() {
+          const now = performance.now();
+          frameCt++;
+          if (now - fpsT > 1000) { fps = frameCt; frameCt = 0; fpsT = now; }
+
+          if (video.currentTime !== lastVideoTime) {
+            lastVideoTime = video.currentTime;
+            const results = poseLandmarker.detectForVideo(video, now);
+            const mp = getMap();
+
+            const dets = [], rawPoses = [];
+            if (results.landmarks) {
+              for (const pose of results.landmarks) {
+                const lS = pose[11], rS = pose[12], lH = pose[23], rH = pose[24];
+                const lA = pose[27], rA = pose[28];
+                if (!lS || !rS || !lH || !rH) continue;
+                const cx = (lH.x + rH.x) / 2, cy = (lH.y + rH.y) / 2;
+                const sMid = lm2px({ x: (lS.x+rS.x)/2, y: (lS.y+rS.y)/2 }, mp);
+                const hMid = lm2px({ x: cx, y: cy }, mp);
+                const torsoH = Math.abs(hMid.y - sMid.y);
+                const sw = Math.abs(lm2px(lS, mp).x - lm2px(rS, mp).x);
+                let footY = hMid.y + torsoH * 0.9;
+                if (lA && rA) footY = Math.max(lm2px(lA,mp).y, lm2px(rA,mp).y);
+                dets.push({ nx: cx, ny: cy, px: hMid.x, footY, torsoH, shoulderW: sw });
+                rawPoses.push(pose);
+              }
+            }
+
+            // Match
+            const used = new Set(), surv = [];
+            for (const p of people) {
+              let bD = Infinity, bI = -1;
+              for (let i = 0; i < dets.length; i++) {
+                if (used.has(i)) continue;
+                const d = Math.hypot(dets[i].nx - p.nx, dets[i].ny - p.ny);
+                if (d < bD && d < CFG.trackThreshold) { bD = d; bI = i; }
+              }
+              if (bI >= 0) {
+                used.add(bI);
+                const det = dets[bI], s = CFG.smoothing;
+                surv.push({ ...p,
+                  nx: det.nx, ny: det.ny,
+                  px: p.px*s + det.px*(1-s), footY: p.footY*s + det.footY*(1-s),
+                  torsoH: p.torsoH*s + det.torsoH*(1-s),
+                  shoulderW: p.shoulderW*s + det.shoulderW*(1-s),
+                  ghost: 0, _pi: bI,
+                });
+              } else if (p.ghost < CFG.ghostFrames) {
+                surv.push({ ...p, ghost: p.ghost + 1, _pi: -1 });
+              }
+            }
+            const usedC = new Set(surv.map(p => p.ci));
+            for (let i = 0; i < dets.length; i++) {
+              if (used.has(i)) continue;
+              let fc = -1;
+              for (let c = 0; c < 4; c++) { if (!usedC.has(c)) { fc = c; break; } }
+              if (fc < 0) break;
+              usedC.add(fc);
+              const p = newPerson(dets[i], fc); p._pi = i; surv.push(p);
+            }
+
+            // Activity + gestures
+            for (const p of surv) {
+              if (p._pi >= 0 && rawPoses[p._pi]) {
+                detectActivity(rawPoses[p._pi], p, now);
+                if (detectWave(rawPoses[p._pi], p, now)) {
+                  spawnCharacter(p, mp, now);
+                }
+              }
+            }
+
+            // Follow
+            // Character stays fixed where it spawned
+
+            people = surv;
+            drawIndicators(mp);
+
+            if (showDebug) {
+              debugEl.innerHTML =
+                `FPS: ${fps}  Poses: ${results.landmarks ? results.landmarks.length : 0}  Tracked: ${people.length}\n` +
+                `Char: ${charActive ? 'ACTIVE' : 'ready'}  Last GIF: ${lastGifIdx >= 0 ? GIFS[lastGifIdx].desc : 'none'}\n\n` +
+                people.map(p =>
+                  `[${p.ci}] ${p.activity.toUpperCase()} vel=${p.velocity.toFixed(4)} ` +
+                  `hand=${p.handUp} wave=${(p.waveProgress||0).toFixed(1)} ` +
+                  `hold=${(p.holdProgress||0).toFixed(1)} ghost=${p.ghost}`
+                ).join("\n");
+            }
+          }
+          requestAnimationFrame(loop);
+        }
+        loop();
+      } catch (err) {
+        statusMsg.textContent = "Error: " + err.message;
+        console.error(err);
+      }
+    }
+
+    document.addEventListener("keydown", e => {
+      if (e.key === "d" || e.key === "D") { showDebug = !showDebug; debugEl.style.display = showDebug ? "block" : "none"; }
+      if (e.key === "f" || e.key === "F") document.documentElement.requestFullscreen?.();
+    });
+    document.body.addEventListener("click", () => {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
+    });
+
+    init();
+  </script>
+</body>
+</html>
