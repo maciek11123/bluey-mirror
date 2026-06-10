@@ -115,13 +115,13 @@
     // ─── GIF LIBRARY with activity tags ─────────────────
     const GIFS = [
       // ── Animated GIFs ──
-      { src: "bluey_dancing_1.gif",      desc: "Bingo waving, one arm up (animated)",        activity: ["waving"],            animated: true },
-      { src: "bingo_dance_1.gif",        desc: "Bingo dancing, smug pose (animated)",         activity: ["waving", "dancing"], animated: true },
-      { src: "bluey_1.gif",              desc: "Orange dog grooving, eyes closed (animated)", activity: ["dancing"],           animated: true },
-      { src: "bluey_bingo_dance_1.gif",  desc: "Dog with guitar, performing (animated)",      activity: ["dancing"],           animated: true },
-      { src: "bluey_bingo_surprised.gif",desc: "Bingo surprised face (animated)",             activity: ["jumping", "armsup"], animated: true },
-      { src: "bluey_bong_happy.gif",     desc: "Colorful bird character (animated)",          activity: ["idle", "waving"],    animated: true },
-      { src: "bluey_dancing_2.gif",      desc: "Bluey the blue dog, dancing (animated)",      activity: ["dancing", "waving"], animated: true },
+      { src: "bluey_dancing_1.gif",      desc: "Bingo waving, one arm up (animated)",        activity: ["waving","dancing","idle","jumping","armsup"], animated: true },
+      { src: "bingo_dance_1.gif",        desc: "Bingo dancing, smug pose (animated)",         activity: ["waving","dancing","idle","jumping","armsup"], animated: true },
+      { src: "bluey_1.gif",              desc: "Orange dog grooving, eyes closed (animated)", activity: ["waving","dancing","idle","jumping","armsup"], animated: true },
+      { src: "bluey_bingo_dance_1.gif",  desc: "Dog with guitar, performing (animated)",      activity: ["waving","dancing","idle","jumping","armsup"], animated: true },
+      { src: "bluey_bingo_surprised.gif",desc: "Bingo surprised face (animated)",             activity: ["waving","dancing","idle","jumping","armsup"], animated: true },
+      { src: "bluey_bong_happy.gif",     desc: "Colorful bird character (animated)",          activity: ["waving","dancing","idle","jumping","armsup"], animated: true },
+      { src: "bluey_dancing_2.gif",      desc: "Bluey the blue dog, dancing (animated)",      activity: ["waving","dancing","idle","jumping","armsup"], animated: true },
       // ── Static PNGs (fallback) ──
       { src: "bluey_arms_up.png",        desc: "Bluey excited, arms raised wide",             activity: ["armsup", "waving"],  animated: false },
       { src: "bluey_scared.png",         desc: "Bluey startled, fists up",                    activity: ["jumping"],           animated: false },
@@ -344,23 +344,20 @@
     }
 
     function positionChar(person, mp) {
-      // Fixed 50% of screen height.
-      const charH = mp.ch * 0.50;
+      const charH = window.innerHeight * 0.50; // match CSS 50vh for positioning math
+      const charW = charH * 0.8; // approximate width for clamping
 
       const dir = person.px < mp.cw / 2 ? 1 : -1;
       const offset = person.shoulderW * 1.2 * dir;
 
-      let x = person.px + offset - charH * 0.4;
+      let x = person.px + offset - charW * 0.4;
       let y = person.footY - charH;
 
-      x = Math.max(0, Math.min(x, mp.cw - charH * 0.8));
+      x = Math.max(0, Math.min(x, mp.cw - charW));
       y = Math.max(0, Math.min(y, mp.ch - charH));
 
-      charEl.style.left   = x + "px";
-      charEl.style.top    = y + "px";
-      // height set via CSS (50vh)
-      // width set via CSS (auto)
-      
+      charEl.style.left = x + "px";
+      charEl.style.top  = y + "px";
     }
 
     // ─── TRACKING INDICATORS ────────────────────────────
